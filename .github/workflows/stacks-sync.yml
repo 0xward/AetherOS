@@ -1,0 +1,110 @@
+name: Stacks Network Sync
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+    - cron: '0 3 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 8 * * *'
+    - cron: '0 11 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 16 * * *'
+    - cron: '0 18 * * *'
+    - cron: '0 21 * * *'
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Decide whether to proceed
+        id: gate
+        run: |
+          ROLL=$((RANDOM % 10))
+          if [ $ROLL -lt 4 ]; then
+            echo "run=false" >> $GITHUB_OUTPUT
+          else
+            echo "run=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Pull Stacks data
+        if: steps.gate.outputs.run == 'true'
+        id: stacks
+        run: |
+          INFO=$(curl -sf "https://api.hiro.so/v2/info" || echo '{}')
+          HEIGHT=$(echo "$INFO" | python3 -c "
+          import sys, json
+          try:
+            d = json.load(sys.stdin)
+            print(d.get('stacks_tip_height', ''))
+          except:
+            print('')
+          ")
+          BURN=$(echo "$INFO" | python3 -c "
+          import sys, json
+          try:
+            d = json.load(sys.stdin)
+            print(d.get('burn_block_height', ''))
+          except:
+            print('')
+          ")
+          echo "height=$HEIGHT" >> $GITHUB_OUTPUT
+          echo "burn=$BURN" >> $GITHUB_OUTPUT
+
+      - name: Pick a commit message
+        if: steps.gate.outputs.run == 'true'
+        id: msg
+        run: |
+          HEIGHT="${{ steps.stacks.outputs.height }}"
+          BURN="${{ steps.stacks.outputs.burn }}"
+          DATE=$(date -u +"%Y-%m-%d")
+
+          MESSAGES=(
+            "update: refresh Stacks network snapshot for $DATE"
+            "data: sync ecosystem state — block $HEIGHT"
+            "chore: update network data, BTC anchor $BURN"
+            "feat(data): latest Stacks metrics for dashboard context"
+            "sync: pull fresh Stacks tip for strategy engine"
+            "update: ecosystem pulse $DATE"
+            "data: network health snapshot, tip $HEIGHT"
+            "chore: keep Stacks state current — $DATE"
+            "sync: Stacks mainnet data refresh"
+            "update: network snapshot for AI context — block $HEIGHT"
+          )
+
+          IDX=$((RANDOM % ${#MESSAGES[@]}))
+          echo "text=${MESSAGES[$IDX]}" >> $GITHUB_OUTPUT
+
+      - name: Write data file
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          mkdir -p data
+          cat > data/stacks-state.json << EOF
+          {
+            "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "stacks_block": "${{ steps.stacks.outputs.height }}",
+            "btc_anchor": "${{ steps.stacks.outputs.burn }}",
+            "network": "mainnet",
+            "context": "AetherOS strategy engine network reference"
+          }
+          EOF
+
+      - name: Commit
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name "0xward"
+          git config user.email "0xward.dev@gmail.com"
+          git add data/stacks-state.json
+
+          if git diff --staged --quiet; then
+            echo "Nothing changed, skipping commit."
+          else
+            git commit -m "${{ steps.msg.outputs.text }}"
+            git push
+          fi
