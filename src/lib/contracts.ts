@@ -36,6 +36,32 @@ function toNum(raw: unknown): number {
   return 0;
 }
 
+// Safely convert any Clarity value to a plain JS string.
+// cvToValue can return a plain string, or a wrapped { type, value } object
+// (this happens for tuple fields, where cvToJSON is used internally).
+function toStr(raw: unknown): string {
+  if (raw === null || raw === undefined) return '';
+  // Unwrap { value: ... } wrapper that cvToValue sometimes produces
+  if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+    return toStr((raw as { value: unknown }).value);
+  }
+  if (typeof raw === 'string') return raw;
+  return String(raw);
+}
+
+// Safely convert any Clarity value to a plain JS boolean.
+// Tuple fields of type bool come back as { type: 'bool', value: true|false },
+// and Boolean(...) on that object would always be true — so unwrap first.
+function toBool(raw: unknown): boolean {
+  if (raw === null || raw === undefined) return false;
+  if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+    return toBool((raw as { value: unknown }).value);
+  }
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'string') return raw === 'true';
+  return Boolean(raw);
+}
+
 // Unwrap (ok value) or (some value) from Clarity response
 function unwrap(val: unknown): unknown {
   if (val === null || val === undefined) return null;
@@ -200,15 +226,15 @@ export async function getProposal(proposalId: number, senderAddress: string): Pr
     if (!val || typeof val !== 'object') return null;
     return {
       id: toNum(val.id),
-      title: String(val.title ?? ''),
-      description: String(val.description ?? ''),
-      proposer: String(val.proposer ?? ''),
+      title: toStr(val.title),
+      description: toStr(val.description),
+      proposer: toStr(val.proposer),
       votesFor: toNum(val['votes-for'] ?? val.votesFor),
       votesAgainst: toNum(val['votes-against'] ?? val.votesAgainst),
       createdAt: toNum(val['created-at'] ?? val.createdAt),
       endsAt: toNum(val['ends-at'] ?? val.endsAt),
-      executed: Boolean(val.executed),
-      passed: Boolean(val.passed),
+      executed: toBool(val.executed),
+      passed: toBool(val.passed),
     };
   } catch {
     return null;
